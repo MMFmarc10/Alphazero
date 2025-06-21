@@ -18,13 +18,15 @@ class AlphaZeroConfig:
 
     def __init__(self):
         # Entrenamiento general
-        self.num_iterations = 6
+        self.num_iterations = 10
 
         # SelfPlay
         self.num_selfplay_games = 400
         self.num_selfplay_workers = 4
         self.simultaneous_games_per_worker = 50
         self.games_for_worker = self.num_selfplay_games // self.num_selfplay_workers
+        self.selfplay_temperature = 1.25
+        self.temperature_threshold = 3
         
         # Entrenamiento de red neuronal
         self.batch_size = 64
@@ -33,12 +35,12 @@ class AlphaZeroConfig:
         self.weight_decay=0.0001
 
         # MCTS
-        self.num_mcts_simulations = 80
+        self.num_mcts_simulations = 90
         self.C = 1.5
 
         # Model
-        self.num_residual_blocks = 3
-        self.num_filters = 32
+        self.num_residual_blocks = 4
+        self.num_filters = 64
 
 
 # Clase principal que coordina el ciclo de entrenamiento AlphaZero (self-play y entrenamiento)
@@ -192,10 +194,26 @@ class AlphaZero:
 
         os.makedirs("model_versions", exist_ok=True)
         
-        filename = f"model_versions/model_prova_{iteration}.pth"
+        filename = f"model_versions/model_temperature1_{iteration}.pth"
         
         torch.save(self.model.state_dict(), filename)
-                
+
+
+def aplicar_temperatura(probs, turn, config):
+
+    if turn < config.temperature_threshold:
+        temperature = config.selfplay_temperature
+
+        # Aplicar softmax con temperatura
+        logits = np.log(probs + 1e-8) / temperature
+        policy = np.exp(logits) / np.sum(np.exp(logits))
+        return policy
+
+    else:
+        # No aplicar temperatura, usar directamente las probabilidades
+        return probs
+
+
 # Proceso que ejecuta múltiples partidas en paralelo con MCTS y devuelve datos de entrenamiento
 def self_play_worker(game_class,mcts_class,config, result_queue, request_model_queue,response_model_queue, wid):
 
@@ -205,6 +223,7 @@ def self_play_worker(game_class,mcts_class,config, result_queue, request_model_q
             self.history = []
             self.winner = None
             self.terminado = False
+            self.num_turn = 0
 
     datos = []
 
@@ -218,16 +237,31 @@ def self_play_worker(game_class,mcts_class,config, result_queue, request_model_q
 
             resultados_mcts = mcts_class(games, config.num_mcts_simulations, config.C, request_model_queue,response_model_queue, wid).iniciar()
 
+
             for game_info, (_, probs, _) in zip(games_info_active, resultados_mcts):
+
+
+                probs_temperature = aplicar_temperatura(probs, game_info.num_turn, config)
+                #print("**************************")
+                #print("probs:")
+                #print(np.array2string(probs, precision=3, suppress_small=True, separator=", "))
+
+                #print("probs_temperature:")
+                #print(np.array2string(probs_temperature, precision=3, suppress_small=True, separator=", "))
+                #print("**************************")
+
                 encoded_board = game_info.game.encode_board()
                 jugador_actual = game_info.game.player
 
-                game_info.history.append((encoded_board, probs, jugador_actual))
+                game_info.history.append((encoded_board, probs_temperature, jugador_actual))
 
-                move = np.random.choice(game_info.game.ACTION_SIZE, p=probs)
+                move = np.random.choice(game_info.game.ACTION_SIZE, p=probs_temperature)
                 game_info.game.make_move(move)
 
+                game_info.num_turn  += 1
+
                 terminado = game_info.game.is_game_over()
+
                 if terminado:
                     game_info.terminado = True
                     game_info.winner = game_info.game.get_game_result()
@@ -238,6 +272,7 @@ def self_play_worker(game_class,mcts_class,config, result_queue, request_model_q
                 datos.append((encoded_board, probs, z))
 
     result_queue.put(datos)
+
 
 # Proceso que ejecuta inferencia centralizada: el modelo realiza las predicciones que recibe en la cola
 def inference_worker(game_class,model_class,model_path, device, config,request_queue, response_queues):

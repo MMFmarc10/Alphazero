@@ -66,11 +66,11 @@ def jugar_vs_modelo(model, device):
             break
 
 
-model = AlphaZeroModel(TresEnRaya(), num_residual_blocks=5, num_filters=64)
+model = AlphaZeroModel(TresEnRaya(), num_residual_blocks=4, num_filters=64)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model.load_state_dict(torch.load("model_versions/model_iter_5.pth", map_location=device))
+model.load_state_dict(torch.load("model_versions/model_temperature1_5.pth", map_location=device))
 model.to(device)
 model.eval()
 
