@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 
+
 class MCTS:
 
     class Node:
@@ -35,7 +36,6 @@ class MCTS:
                     
                     node = MCTS.Node(prob,game_child,move, C=self.C)
                     self.children.append(node)
-                
 
 
         def select(self):
@@ -63,14 +63,16 @@ class MCTS:
             self.value = None
             self.terminada = None
     
-    def __init__(self, games ,num_simulations, C ,request_model_queue, response_model_queue, worker_id):
+    def __init__(self, games ,config,request_model_queue, response_model_queue, worker_id):
         self.games = games
         self.num_parallel_mcts = len(games)
-        self.simulations = num_simulations
+        self.simulations = config.num_mcts_simulations
         self.request_model_queue = request_model_queue
         self.response_model_queue = response_model_queue
         self.worker_id = worker_id
-        self.C = C
+        self.C = config.C
+        self.dirichlet_alpha = config.dirichlet_alpha
+        self.exploration_fraction = config.exploration_fraction
         
     def iniciar(self):
 
@@ -134,6 +136,7 @@ class MCTS:
     def expand_nodes(self, expandable_pararlel_mcts):
 
         if len(expandable_pararlel_mcts)>0:
+
             nodos_a_expandir = [mcts.selected_node for mcts in expandable_pararlel_mcts]
         
             distribuciones, valores = self.obtener_distribuciones_batch(nodos_a_expandir)
@@ -141,6 +144,8 @@ class MCTS:
             for mcts_i, distribucion, value in zip(
             [m for m in expandable_pararlel_mcts if not m.terminada], distribuciones, valores
             ):
+                if mcts_i.selected_node is mcts_i.root:
+                    distribucion = self.aplicar_ruido(distribucion)
                 mcts_i.selected_node.expand(distribucion)
                 mcts_i.value = value
 
@@ -176,6 +181,25 @@ class MCTS:
             distribuciones_legales.append(legal_policy)
 
         return distribuciones_legales, valores
+
+    def aplicar_ruido(self, distribucion):
+
+
+        alpha = self.dirichlet_alpha
+        epsilon = self.exploration_fraction
+
+        # Aplica Dirichlet solo sobre las acciones legales (>0 en la distribución)
+        legal_indices = np.where(distribucion > 0)[0]
+        dir_noise = np.zeros_like(distribucion)
+
+        if len(legal_indices) > 0:
+            dirichlet = np.random.dirichlet([alpha] * len(legal_indices))
+            dir_noise[legal_indices] = dirichlet
+
+            distribucion = (1 - epsilon) * distribucion + epsilon * dir_noise
+            distribucion /= np.sum(distribucion)  # Re-normalizar
+
+        return distribucion
 
 
 

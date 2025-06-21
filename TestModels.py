@@ -27,7 +27,7 @@ def seleccionar_accion(model, juego, device):
     else:
         return None
 
-    probs = suavizar_probs(probs,0.5)
+    probs = suavizar_probs(probs,0.3)
 
     return np.random.choice(len(probs), p=probs)
 
@@ -56,7 +56,7 @@ def jugar_partida(modelo1, modelo2, juego_clase, device, verbose=False):
 def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=100, verbose=False):
 
 
-    modelo1 = AlphaZeroModel(juego_clase(), num_residual_blocks=3, num_filters=32)
+    modelo1 = AlphaZeroModel(juego_clase(), num_residual_blocks=4, num_filters=64)
     modelo2 = AlphaZeroModel(juego_clase(), num_residual_blocks=4, num_filters=64)
 
     modelo1.load_state_dict(torch.load(model_path_1, map_location=device))
@@ -97,9 +97,9 @@ if __name__ == "__main__":
 
     evaluar_modelos(
         juego_clase=TresEnRaya,
-        model_path_1="model_versions/model_temperature_5.pth",
-        model_path_2="model_versions/model_temperature1_9.pth",
+        model_path_1="model_versions/model_ruido_0.pth",
+        model_path_2="model_versions/model_ruido_9.pth",
         device= device,
-        n_partidas=2000,
+        n_partidas=1000,
         verbose=False
     )

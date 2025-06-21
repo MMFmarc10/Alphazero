@@ -11,7 +11,7 @@ def jugar_vs_modelo(model, device):
 
     while True:
 
-        if juego.player == 1:
+        if juego.player == -1:
 
             print("")
             juego.print_board()
@@ -70,7 +70,7 @@ model = AlphaZeroModel(TresEnRaya(), num_residual_blocks=4, num_filters=64)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model.load_state_dict(torch.load("model_versions/model_temperature1_5.pth", map_location=device))
+model.load_state_dict(torch.load("model_versions/model_ruido_9.pth", map_location=device))
 model.to(device)
 model.eval()
 

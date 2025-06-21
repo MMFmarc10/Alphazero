@@ -21,7 +21,7 @@ class AlphaZeroConfig:
         self.num_iterations = 10
 
         # SelfPlay
-        self.num_selfplay_games = 400
+        self.num_selfplay_games = 500
         self.num_selfplay_workers = 4
         self.simultaneous_games_per_worker = 50
         self.games_for_worker = self.num_selfplay_games // self.num_selfplay_workers
@@ -37,6 +37,8 @@ class AlphaZeroConfig:
         # MCTS
         self.num_mcts_simulations = 90
         self.C = 1.5
+        self.dirichlet_alpha = 0.3  # Típico para 10–40 acciones posibles
+        self.exploration_fraction = 0.25  # 25% ruido, 75% red
 
         # Model
         self.num_residual_blocks = 4
@@ -194,7 +196,7 @@ class AlphaZero:
 
         os.makedirs("model_versions", exist_ok=True)
         
-        filename = f"model_versions/model_temperature1_{iteration}.pth"
+        filename = f"model_versions/model_ruido_{iteration}.pth"
         
         torch.save(self.model.state_dict(), filename)
 
@@ -235,20 +237,13 @@ def self_play_worker(game_class,mcts_class,config, result_queue, request_model_q
             games_info_active = [g for g in games_info if not g.terminado]
             games = [g.game for g in games_info_active]
 
-            resultados_mcts = mcts_class(games, config.num_mcts_simulations, config.C, request_model_queue,response_model_queue, wid).iniciar()
+            resultados_mcts = mcts_class(games, config, request_model_queue,response_model_queue, wid).iniciar()
 
 
             for game_info, (_, probs, _) in zip(games_info_active, resultados_mcts):
 
 
                 probs_temperature = aplicar_temperatura(probs, game_info.num_turn, config)
-                #print("**************************")
-                #print("probs:")
-                #print(np.array2string(probs, precision=3, suppress_small=True, separator=", "))
-
-                #print("probs_temperature:")
-                #print(np.array2string(probs_temperature, precision=3, suppress_small=True, separator=", "))
-                #print("**************************")
 
                 encoded_board = game_info.game.encode_board()
                 jugador_actual = game_info.game.player
