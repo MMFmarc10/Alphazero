@@ -3,15 +3,15 @@ import torch
 
 from AlphaZeroModel import AlphaZeroModel
 from games.TresEnRaya import TresEnRaya
+from games.CuatroEnRaya import CuatroEnRaya
 
 
-def jugar_vs_modelo(model, device):
+def jugar_vs_modelo(juego,model, device):
 
-    juego = TresEnRaya()
 
     while True:
 
-        if juego.player == -1:
+        if juego.player == 1:
 
             print("")
             juego.print_board()
@@ -66,12 +66,12 @@ def jugar_vs_modelo(model, device):
             break
 
 
-model = AlphaZeroModel(TresEnRaya(), num_residual_blocks=4, num_filters=64)
+model = AlphaZeroModel(CuatroEnRaya(), num_residual_blocks=8, num_filters=128)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model.load_state_dict(torch.load("model_versions/model_ruido_9.pth", map_location=device))
+model.load_state_dict(torch.load("model_versions/model_c4_11.pth", map_location=device))
 model.to(device)
 model.eval()
 
-jugar_vs_modelo(model, device)
+jugar_vs_modelo(CuatroEnRaya(),model, device)

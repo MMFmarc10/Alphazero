@@ -3,10 +3,32 @@ import math
 
 import numpy as np
 import torch
+from collections import OrderedDict
 
+
+class MCTSCache:
+    def __init__(self, capacity=10000):
+        self.cache = OrderedDict()
+        self.capacity = capacity
+
+    def get(self, key):
+        if key not in self.cache:
+            return None
+        self.cache.move_to_end(key)
+        return self.cache[key]
+
+    def put(self, key, value):
+
+        if key in self.cache:
+            self.cache.move_to_end(key)
+
+        self.cache[key] = value
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
 
 
 class MCTS:
+
 
     class Node:
         def __init__(self,prior,game,move=None, C=1.5):
@@ -73,6 +95,10 @@ class MCTS:
         self.C = config.C
         self.dirichlet_alpha = config.dirichlet_alpha
         self.exploration_fraction = config.exploration_fraction
+
+        self.cache = MCTSCache()
+        self.cache_hits = 0
+        self.cache_misses = 0
         
     def iniciar(self):
 
@@ -92,7 +118,7 @@ class MCTS:
 
             # Expansion
             nodos_a_expandir = [mcts_i for mcts_i in parallel_mcts if not mcts_i.terminada]
-            self.expand_nodes(nodos_a_expandir)
+            self.expand_nodes_cache(nodos_a_expandir)
         
 
             # Backpropagation
@@ -119,6 +145,7 @@ class MCTS:
 
             resultados.append((moves, distribution, root.value()))
         
+        #print(f"[MCTS Cache] Hits: {self.cache_hits} | Misses: {self.cache_misses}")
 
         return resultados  # lista de tuplas (moves, distribution, value)
 
@@ -148,6 +175,50 @@ class MCTS:
                     distribucion = self.aplicar_ruido(distribucion)
                 mcts_i.selected_node.expand(distribucion)
                 mcts_i.value = value
+
+    def expand_nodes_cache(self, expandable_pararlel_mcts):
+
+        if not expandable_pararlel_mcts:
+            return
+
+        mcts_pendientes_prediccion = []
+
+        # Mirar qué nodos ya están en cache
+        for mcts_i in expandable_pararlel_mcts:
+            node = mcts_i.selected_node
+            encoded = node.game.encode_board()
+            key = encoded.tobytes()
+
+            cached = self.cache.get(key)
+            if cached:
+
+                distribucion, value = cached
+                self.cache_hits +=1
+                if node is mcts_i.root:
+                    distribucion = self.aplicar_ruido(distribucion)
+                node.expand(distribucion)
+                mcts_i.value = value
+            else:
+                self.cache_misses+=1
+                mcts_pendientes_prediccion.append(mcts_i)
+
+        if not mcts_pendientes_prediccion:
+            return
+
+        nodos_a_expandir = [mcts.selected_node for mcts in mcts_pendientes_prediccion]
+
+        distribuciones, valores = self.obtener_distribuciones_batch(nodos_a_expandir)
+
+        for mcts_i, distribucion, value in zip(mcts_pendientes_prediccion, distribuciones, valores):
+            if mcts_i.selected_node is mcts_i.root:
+                distribucion = self.aplicar_ruido(distribucion)
+            mcts_i.selected_node.expand(distribucion)
+            mcts_i.value = value
+
+            # Guardamos en caché
+            encoded = mcts_i.selected_node.game.encode_board()
+            key = encoded.tobytes()
+            self.cache.put(key, (distribucion, value))
 
 
     def backpropagate(self, search_path, value):

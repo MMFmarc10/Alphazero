@@ -11,6 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 from AlphaZeroModel import AlphaZeroModel
 from MCTSmultiprocessing import MCTS
 from games.TresEnRaya import TresEnRaya
+from games.CuatroEnRaya import CuatroEnRaya
 
 
 # Clase de configuración con todos los parámetros de AlphaZero
@@ -18,31 +19,31 @@ class AlphaZeroConfig:
 
     def __init__(self):
         # Entrenamiento general
-        self.num_iterations = 10
+        self.num_iterations = 24
 
         # SelfPlay
-        self.num_selfplay_games = 500
-        self.num_selfplay_workers = 4
-        self.simultaneous_games_per_worker = 50
+        self.num_selfplay_games = 400
+        self.num_selfplay_workers = 5
+        self.simultaneous_games_per_worker = 40
         self.games_for_worker = self.num_selfplay_games // self.num_selfplay_workers
         self.selfplay_temperature = 1.25
-        self.temperature_threshold = 3
+        self.temperature_threshold = 10
         
         # Entrenamiento de red neuronal
-        self.batch_size = 64
+        self.batch_size = 128
         self.learning_rate = 0.001
         self.num_epochs = 4
         self.weight_decay=0.0001
 
         # MCTS
-        self.num_mcts_simulations = 90
+        self.num_mcts_simulations = 300
         self.C = 1.5
         self.dirichlet_alpha = 0.3  # Típico para 10–40 acciones posibles
         self.exploration_fraction = 0.25  # 25% ruido, 75% red
 
         # Model
-        self.num_residual_blocks = 4
-        self.num_filters = 64
+        self.num_residual_blocks = 8
+        self.num_filters = 128
 
 
 # Clase principal que coordina el ciclo de entrenamiento AlphaZero (self-play y entrenamiento)
@@ -196,7 +197,7 @@ class AlphaZero:
 
         os.makedirs("model_versions", exist_ok=True)
         
-        filename = f"model_versions/model_ruido_{iteration}.pth"
+        filename = f"model_versions/model_c4_corrected{iteration}.pth"
         
         torch.save(self.model.state_dict(), filename)
 
@@ -335,12 +336,12 @@ def log_training_batch(path, boards, pred_pi, pred_v, target_pi, target_v, iter_
 if __name__ == '__main__':
     mp.set_start_method("spawn", force=True)
     config = AlphaZeroConfig()
-    game = TresEnRaya()
+    game = CuatroEnRaya()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = AlphaZeroModel(game, config.num_residual_blocks, config.num_filters)
     optimizer = optim.SGD(model.parameters(), lr=config.learning_rate, momentum=0.9, weight_decay=config.weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
-    alphazero = AlphaZero(TresEnRaya,MCTS,AlphaZeroModel,model,device,optimizer,scheduler,config)
+    alphazero = AlphaZero(CuatroEnRaya,MCTS,AlphaZeroModel,model,device,optimizer,scheduler,config)
     alphazero.run()
 
 
