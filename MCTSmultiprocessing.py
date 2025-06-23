@@ -6,6 +6,7 @@ import torch
 from collections import OrderedDict
 
 
+
 class MCTSCache:
     def __init__(self, capacity=10000):
         self.cache = OrderedDict()
@@ -85,17 +86,18 @@ class MCTS:
             self.value = None
             self.terminada = None
     
-    def __init__(self, games ,config,request_model_queue, response_model_queue, worker_id):
+    def __init__(self, games, num_simulations ,config,request_model_queue, response_model_queue, worker_id, mode="selfplay",model_id = "model1"):
         self.games = games
         self.num_parallel_mcts = len(games)
-        self.simulations = config.num_mcts_simulations
+        self.simulations = num_simulations
         self.request_model_queue = request_model_queue
         self.response_model_queue = response_model_queue
         self.worker_id = worker_id
         self.C = config.C
         self.dirichlet_alpha = config.dirichlet_alpha
         self.exploration_fraction = config.exploration_fraction
-
+        self.mode = mode
+        self.model_id = model_id
         self.cache = MCTSCache()
         self.cache_hits = 0
         self.cache_misses = 0
@@ -171,7 +173,7 @@ class MCTS:
             for mcts_i, distribucion, value in zip(
             [m for m in expandable_pararlel_mcts if not m.terminada], distribuciones, valores
             ):
-                if mcts_i.selected_node is mcts_i.root:
+                if mcts_i.selected_node is mcts_i.root and self.mode == "selfplay":
                     distribucion = self.aplicar_ruido(distribucion)
                 mcts_i.selected_node.expand(distribucion)
                 mcts_i.value = value
@@ -194,7 +196,7 @@ class MCTS:
 
                 distribucion, value = cached
                 self.cache_hits +=1
-                if node is mcts_i.root:
+                if node is mcts_i.root and self.mode == "selfplay":
                     distribucion = self.aplicar_ruido(distribucion)
                 node.expand(distribucion)
                 mcts_i.value = value
@@ -232,7 +234,10 @@ class MCTS:
     def obtener_distribuciones_batch(self, nodos):
         encoded_boards = [torch.tensor(node.game.encode_board(), dtype=torch.float32) for node in nodos]
 
-        self.request_model_queue.put((encoded_boards, self.worker_id))
+        if self.mode == "selfplay":
+            self.request_model_queue.put((encoded_boards, self.worker_id))
+        else:
+            self.request_model_queue.put((encoded_boards, self.worker_id,self.model_id))
 
         policy_tensors, value_tensors = self.response_model_queue.get()
 
@@ -254,7 +259,6 @@ class MCTS:
         return distribuciones_legales, valores
 
     def aplicar_ruido(self, distribucion):
-
 
         alpha = self.dirichlet_alpha
         epsilon = self.exploration_fraction

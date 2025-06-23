@@ -3,7 +3,7 @@ import torch
 
 from AlphaZeroModel import AlphaZeroModel
 from games.CuatroEnRaya import CuatroEnRaya
-
+from games.TresEnRaya import TresEnRaya
 
 
 def suavizar_probs(probs, temperatura):
@@ -76,8 +76,8 @@ def jugar_partida(modelo1, modelo2, juego_clase, device, verbose=False):
 def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=100,verbose=False):
 
 
-    modelo1 = AlphaZeroModel(juego_clase(), num_residual_blocks=8, num_filters=128)
-    modelo2 = AlphaZeroModel(juego_clase(), num_residual_blocks=8, num_filters=128)
+    modelo1 = AlphaZeroModel(juego_clase(), num_residual_blocks=4, num_filters=64)
+    modelo2 = AlphaZeroModel(juego_clase(), num_residual_blocks=4, num_filters=64)
 
     modelo1.load_state_dict(torch.load(model_path_1, map_location=device))
     modelo2.load_state_dict(torch.load(model_path_2, map_location=device))
@@ -88,7 +88,7 @@ def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=1
     resultados = {"modelo1": 0, "modelo2": 0, "empates": 0}
 
     for i in range(n_partidas):
-        resultado = jugar_partida(modelo1, modelo2, juego_clase, device, mode,verbose)
+        resultado = jugar_partida(modelo1, modelo2, juego_clase, device,verbose)
         if resultado == 1:
             resultados["modelo1"] += 1
         elif resultado == -1:
@@ -116,9 +116,9 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     evaluar_modelos(
-        juego_clase=CuatroEnRaya,
-        model_path_1="model_versions/model_c4_0.pth",
-        model_path_2="model_versions/model_iter_paralel7.pth",
+        juego_clase=TresEnRaya,
+        model_path_1="model_versions/3EnRalla_model_/3EnRalla_model_7.pth",
+        model_path_2="model_versions/3EnRalla_model_/3EnRalla_model_10.pth",
         device= device,
         n_partidas=100,
         verbose=False

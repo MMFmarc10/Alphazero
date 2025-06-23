@@ -70,7 +70,7 @@ model = AlphaZeroModel(CuatroEnRaya(), num_residual_blocks=8, num_filters=128)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model.load_state_dict(torch.load("model_versions/model_c4_11.pth", map_location=device))
+model.load_state_dict(torch.load("model_versions/4EnRalla_model_/4EnRalla_model_15.pth", map_location=device))
 model.to(device)
 model.eval()
 

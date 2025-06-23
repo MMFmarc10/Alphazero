@@ -1,4 +1,5 @@
 import os
+import json
 import time
 
 import numpy as np
@@ -10,54 +11,34 @@ from torch.utils.data import Dataset, DataLoader
 
 from AlphaZeroModel import AlphaZeroModel
 from MCTSmultiprocessing import MCTS
+from configs.cuatro_en_raya_config import CuatroEnRayaConfig
 from games.TresEnRaya import TresEnRaya
 from games.CuatroEnRaya import CuatroEnRaya
-
-
-# Clase de configuración con todos los parámetros de AlphaZero
-class AlphaZeroConfig:
-
-    def __init__(self):
-        # Entrenamiento general
-        self.num_iterations = 24
-
-        # SelfPlay
-        self.num_selfplay_games = 400
-        self.num_selfplay_workers = 5
-        self.simultaneous_games_per_worker = 40
-        self.games_for_worker = self.num_selfplay_games // self.num_selfplay_workers
-        self.selfplay_temperature = 1.25
-        self.temperature_threshold = 10
-        
-        # Entrenamiento de red neuronal
-        self.batch_size = 128
-        self.learning_rate = 0.001
-        self.num_epochs = 4
-        self.weight_decay=0.0001
-
-        # MCTS
-        self.num_mcts_simulations = 300
-        self.C = 1.5
-        self.dirichlet_alpha = 0.3  # Típico para 10–40 acciones posibles
-        self.exploration_fraction = 0.25  # 25% ruido, 75% red
-
-        # Model
-        self.num_residual_blocks = 8
-        self.num_filters = 128
+from configs.tres_en_raya_config import TresEnRayaConfig
 
 
 # Clase principal que coordina el ciclo de entrenamiento AlphaZero (self-play y entrenamiento)
 class AlphaZero:
 
     def __init__(self,game_class,mcts_class,model_class,model,device,optimizer,scheduler,config):
+
         self.game_class = game_class
         self.mcts_class = mcts_class
         self.model_class = model_class
+
         self.model = model
         self.device = device
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.config = config
+
+        self.model_save_name = "4EnRalla_model_"
+        self.model_path = os.path.join("model_versions", self.model_save_name)
+
+        os.makedirs("model_versions", exist_ok=True)
+        os.makedirs(self.model_path, exist_ok=True)
+
+        self.guardar_configuracion()
 
 
     # Crea un Dataset personalizado para AlphaZero a partir de los datos generados
@@ -84,6 +65,8 @@ class AlphaZero:
     # Bucle principal de AlphaZero: genera partidas, entrena el modelo y finalmente guarda el modelo entrenado
     def run(self):
 
+        self.save_model(0)
+
         for iteration in range(self.config.num_iterations):
 
             print(f"\nIteración {iteration + 1}/{self.config.num_iterations}")
@@ -93,7 +76,7 @@ class AlphaZero:
             self.model.eval()
             print("Generando partidas...")
 
-            data = self.generate_games()
+            data = self.generate_games(iteration)
             #save_selfplay_data("logs/selfplay_workers_paralel3.txt", data,iteration)
             
             print(f"Total de posiciones generadas: {len(data)}")
@@ -106,8 +89,9 @@ class AlphaZero:
                 avg_loss = self.train(dataloader,iteration,epoch)
                 print(f"   Epoch {epoch + 1}/{self.config.num_epochs} - Pérdida media: {avg_loss:.4f}")
 
-            self.save_model(iteration)
-            print(f"Modelo guardado como: model_iter_{iteration}.pth")
+            self.save_model(iteration+1)
+            filename = os.path.join(self.model_path, f"{self.model_save_name}{iteration + 1}.pth")
+            print(f"Modelo guardado como: {filename}")
 
             self.scheduler.step()
 
@@ -115,13 +99,12 @@ class AlphaZero:
             print(f"Duración de la iteración: {duration:.2f} segundos")
 
     # Genera partidas mediante self-play en paralelo y devuelve los datos recolectados
-    def generate_games(self):
+    def generate_games(self,iteration):
   
         request_model_queue = mp.Queue()
         response_model_queues = [mp.Queue() for _ in range(self.config.num_selfplay_workers)]
         result_queue = mp.Queue()
-        model_path = f"temp_model_iter_{int(time.time())}.pth"
-        torch.save(self.model.state_dict(), model_path)
+        model_path = os.path.join(self.model_path, f"{self.model_save_name}{iteration}.pth")
 
         # Proceso de inferencia del modelo
         inference_proc = mp.Process(
@@ -158,7 +141,6 @@ class AlphaZero:
 
         request_model_queue.put(None)
         inference_proc.join()
-        os.remove(model_path)
 
         return all_data
 
@@ -195,11 +177,20 @@ class AlphaZero:
     # Guarda el modelo entrenado
     def save_model(self, iteration):
 
-        os.makedirs("model_versions", exist_ok=True)
-        
-        filename = f"model_versions/model_c4_corrected{iteration}.pth"
-        
+        filename = os.path.join(self.model_path, f"{self.model_save_name}{iteration}.pth")
         torch.save(self.model.state_dict(), filename)
+
+
+    def guardar_configuracion(self):
+
+
+        # Guardar configuración como config.json
+        config_dict = vars(self.config)
+        config_path = os.path.join(self.model_path, "config.json")
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f, indent=4)
+
+        pass
 
 
 def aplicar_temperatura(probs, turn, config):
@@ -215,7 +206,6 @@ def aplicar_temperatura(probs, turn, config):
     else:
         # No aplicar temperatura, usar directamente las probabilidades
         return probs
-
 
 # Proceso que ejecuta múltiples partidas en paralelo con MCTS y devuelve datos de entrenamiento
 def self_play_worker(game_class,mcts_class,config, result_queue, request_model_queue,response_model_queue, wid):
@@ -238,7 +228,7 @@ def self_play_worker(game_class,mcts_class,config, result_queue, request_model_q
             games_info_active = [g for g in games_info if not g.terminado]
             games = [g.game for g in games_info_active]
 
-            resultados_mcts = mcts_class(games, config, request_model_queue,response_model_queue, wid).iniciar()
+            resultados_mcts = mcts_class(games, config.num_mcts_simulations,config, request_model_queue,response_model_queue, wid).iniciar()
 
 
             for game_info, (_, probs, _) in zip(games_info_active, resultados_mcts):
@@ -268,7 +258,6 @@ def self_play_worker(game_class,mcts_class,config, result_queue, request_model_q
                 datos.append((encoded_board, probs, z))
 
     result_queue.put(datos)
-
 
 # Proceso que ejecuta inferencia centralizada: el modelo realiza las predicciones que recibe en la cola
 def inference_worker(game_class,model_class,model_path, device, config,request_queue, response_queues):
@@ -335,13 +324,21 @@ def log_training_batch(path, boards, pred_pi, pred_v, target_pi, target_v, iter_
 
 if __name__ == '__main__':
     mp.set_start_method("spawn", force=True)
-    config = AlphaZeroConfig()
+
+    config = CuatroEnRayaConfig()
+
     game = CuatroEnRaya()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     model = AlphaZeroModel(game, config.num_residual_blocks, config.num_filters)
+
     optimizer = optim.SGD(model.parameters(), lr=config.learning_rate, momentum=0.9, weight_decay=config.weight_decay)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
+
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
+
     alphazero = AlphaZero(CuatroEnRaya,MCTS,AlphaZeroModel,model,device,optimizer,scheduler,config)
+
     alphazero.run()
 
 
