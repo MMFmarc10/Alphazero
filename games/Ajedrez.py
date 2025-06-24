@@ -3,7 +3,7 @@ import numpy as np
 
 from games.BaseGame import BaseGame
 
-
+# Implementación del juego Ajedrez compatible con la interfaz AlphaZero (BaseGame).
 class Ajedrez(BaseGame):
 
     ACTION_SIZE = 64*64
@@ -72,7 +72,7 @@ class Ajedrez(BaseGame):
             raise Exception("La partida no ha terminado todavía")
         return self.result
 
-    def get_action_space(self):
+    def get_action_size(self):
         return self.ACTION_SIZE
 
     def encode_board(self):

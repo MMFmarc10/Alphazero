@@ -4,7 +4,7 @@ import numpy as np
 
 from games.BaseGame import BaseGame
 
-
+# Implementación del juego Damas compatible con la interfaz AlphaZero (BaseGame).
 class Damas(BaseGame):
 
     ROWS = 8
@@ -47,7 +47,7 @@ class Damas(BaseGame):
     def get_game_result(self):
        pass
 
-    def get_action_space(self):
+    def get_action_size(self):
         return self.ACTION_SIZE
 
     def encode_board(self):

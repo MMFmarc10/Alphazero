@@ -2,7 +2,7 @@ import numpy as np
 
 from games.BaseGame import BaseGame
 
-
+# Implementación del juego Tres en Raya compatible con la interfaz AlphaZero (BaseGame).
 class TresEnRaya(BaseGame):
 
     ROWS = 3
@@ -59,7 +59,7 @@ class TresEnRaya(BaseGame):
             raise Exception("Game is not finished")
         return self.result
 
-    def get_action_space(self):
+    def get_action_size(self):
         return self.ACTION_SIZE
 
     def encode_board(self):

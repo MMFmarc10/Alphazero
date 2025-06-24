@@ -1,10 +1,13 @@
+import time
+
 import numpy as np
 import torch
 
 from AlphaZeroModel import AlphaZeroModel
 from games.CuatroEnRaya import CuatroEnRaya
-from games.TresEnRaya import TresEnRaya
 
+
+# Comparación de dos modelos AlphaZero sin MCTS usando solo las predicciones del modelo.
 
 def suavizar_probs(probs, temperatura):
 
@@ -51,8 +54,7 @@ def seleccionar_accion_mcts(model, juego, device):
     return np.random.choice(len(probs), p=probs)
 
 
-
-def jugar_partida(modelo1, modelo2, juego_clase, device, verbose=False):
+def jugar_partida(modelo1, modelo2, juego_clase, device):
     juego = juego_clase()
 
     modelos = {1: modelo1, -1: modelo2}
@@ -66,18 +68,14 @@ def jugar_partida(modelo1, modelo2, juego_clase, device, verbose=False):
             break
         juego.make_move(accion)
 
-        if verbose:
-            juego.print_board()
-            print("")
-
     return juego.get_game_result()
 
 
-def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=100,verbose=False):
+def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=100):
 
 
-    modelo1 = AlphaZeroModel(juego_clase(), num_residual_blocks=4, num_filters=64)
-    modelo2 = AlphaZeroModel(juego_clase(), num_residual_blocks=4, num_filters=64)
+    modelo1 = AlphaZeroModel(juego_clase(), num_residual_blocks=8, num_filters=128)
+    modelo2 = AlphaZeroModel(juego_clase(), num_residual_blocks=8, num_filters=128)
 
     modelo1.load_state_dict(torch.load(model_path_1, map_location=device))
     modelo2.load_state_dict(torch.load(model_path_2, map_location=device))
@@ -88,7 +86,7 @@ def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=1
     resultados = {"modelo1": 0, "modelo2": 0, "empates": 0}
 
     for i in range(n_partidas):
-        resultado = jugar_partida(modelo1, modelo2, juego_clase, device,verbose)
+        resultado = jugar_partida(modelo1, modelo2, juego_clase, device)
         if resultado == 1:
             resultados["modelo1"] += 1
         elif resultado == -1:
@@ -96,7 +94,7 @@ def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=1
         else:
             resultados["empates"] += 1
 
-        resultado = jugar_partida(modelo2, modelo1, juego_clase, device, verbose)
+        resultado = jugar_partida(modelo2, modelo1, juego_clase, device)
         if resultado == 1:
             resultados["modelo2"] += 1
         elif resultado == -1:
@@ -112,14 +110,17 @@ def evaluar_modelos(juego_clase, model_path_1, model_path_2, device,n_partidas=1
 
 if __name__ == "__main__":
 
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    start_time = time.time()
+
     evaluar_modelos(
-        juego_clase=TresEnRaya,
-        model_path_1="model_versions/3EnRalla_model_/3EnRalla_model_7.pth",
-        model_path_2="model_versions/3EnRalla_model_/3EnRalla_model_10.pth",
+        juego_clase=CuatroEnRaya,
+        model_path_1="model_versions/4EnRalla_model_/4EnRalla_model_0.pth",
+        model_path_2="model_versions/4EnRalla_model_/4EnRalla_model_15.pth",
         device= device,
-        n_partidas=100,
-        verbose=False
+        n_partidas=200
     )
+
+    duration = time.time() - start_time
+    print(f"\nEvaluación completada en {duration:.2f} segundos.")

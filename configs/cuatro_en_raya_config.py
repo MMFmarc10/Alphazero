@@ -1,3 +1,4 @@
+# Configuración utilizada para aprender el juego CuatroEnRaya
 class CuatroEnRayaConfig:
 
     def __init__(self):
@@ -21,17 +22,17 @@ class CuatroEnRayaConfig:
         # MCTS
         self.num_mcts_simulations = 300
         self.C = 1.5
-        self.dirichlet_alpha = 0.3  # Típico para 10–40 acciones posibles
-        self.exploration_fraction = 0.25  # 25% ruido, 75% red
+        self.dirichlet_alpha = 0.3
+        self.exploration_fraction = 0.25
 
         # Model
         self.num_residual_blocks = 8
         self.num_filters = 128
 
         # Evaluation
-        self.num_test_games = 200  # Cuántas partidas juegan los modelos entre sí
+        self.num_test_games = 200
         self.num_test_workers = 4
         self.test_games_per_worker = 25
-        self.test_num_simulations = 80  # Simulaciones MCTS durante test
-        self.test_temperature = 0.1  # Temperatura baja para decisiones más deterministas
+        self.test_num_simulations = 50
+        self.test_temperature = 0.2
         self.test_win_rate_threshold = 0.55

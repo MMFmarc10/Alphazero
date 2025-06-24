@@ -3,7 +3,7 @@ import numpy as np
 
 from games.BaseGame import BaseGame
 
-
+# Implementación del juego Cuatro en Raya compatible con la interfaz AlphaZero (BaseGame).
 class CuatroEnRaya(BaseGame):
 
     ROWS = 6
@@ -86,14 +86,11 @@ class CuatroEnRaya(BaseGame):
             raise Exception("Game is not finished")
         return self.result
 
-    def get_action_space(self):
+    def get_action_size(self):
         return self.ROWS * self.COLS
 
     def encode_board(self):
-        """
-        Convierte el tablero (np.array de forma [ROWS, COLS]) 
-        en un tensor de forma [2, ROWS, COLS] para entrada a la red.
-        """
+
         if self.player == 1: 
             x_layer = (self.board == 1).astype(int)
             o_layer = (self.board == -1).astype(int)

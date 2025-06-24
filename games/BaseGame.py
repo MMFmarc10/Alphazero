@@ -2,17 +2,17 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-
+# Clase base abstracta para definir la interfaz de un juego compatible con AlphaZero.
 class BaseGame(ABC):
 
     @abstractmethod
     def legal_moves(self) -> list[int]:
-        """Devuelve la lista de movimientos legales del estado de la partida."""
+        """Devuelve la lista de movimientos legales del estado actual de la partida."""
         pass
 
     @abstractmethod
     def legal_moves_mask(self) -> np.ndarray:
-        """Devuelve una máscara binaria de movimientos legales."""
+        """Devuelve una máscara binaria de tamaño Action Size (Movimientos posibles) de movimientos legales."""
         pass
 
     @abstractmethod
@@ -34,7 +34,7 @@ class BaseGame(ABC):
         pass
 
     @abstractmethod
-    def get_action_space(self) -> int:
+    def get_action_size(self) -> int:
         """Devuelve el número total de acciones posibles."""
         pass
 

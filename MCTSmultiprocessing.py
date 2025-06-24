@@ -1,12 +1,13 @@
 import copy
 import math
+from collections import OrderedDict
 
 import numpy as np
 import torch
-from collections import OrderedDict
 
 
-
+# Clase de caché LRU (Least Recently Used) para almacenar predicciones del modelo
+# para enviar menos peticiones a la red neuronal
 class MCTSCache:
     def __init__(self, capacity=10000):
         self.cache = OrderedDict()
@@ -28,63 +29,19 @@ class MCTSCache:
             self.cache.popitem(last=False)
 
 
+# Almacena la información del MCTS de una partida.
+class MCTSInfo:
+    def __init__(self, game, C):
+        self.root = Node(1, game, C=C)
+        self.search_path = []
+        self.selected_node = None
+        self.value = None
+        self.terminada = None
+
+
+# Implementación de Monte Carlo Tree Search (MCTS) para AlphaZero.
+# Realiza simulaciones sobre múltiples juegos en paralelo
 class MCTS:
-
-
-    class Node:
-        def __init__(self,prior,game,move=None, C=1.5):
-            self.prior = prior
-            self.visit_count= 0
-            self.value_sum = 0
-            self.children=[]
-            self.game= game
-            self.move = move
-            self.C = C
-
-        def value(self):
-            if self.visit_count == 0:
-                return 0
-            return self.value_sum / self.visit_count
-
-        def is_expanded(self):
-            return len(self.children)>0
-
-        def expand(self,distribution):
-            
-            for move,prob in enumerate(distribution):
-
-                if prob != 0:
-                    game_child = copy.deepcopy(self.game)
-                    game_child.make_move(move)
-                    
-                    node = MCTS.Node(prob,game_child,move, C=self.C)
-                    self.children.append(node)
-
-
-        def select(self):
-
-            mejor_ucb = -np.inf
-            mejor_nodo= None
-            for node in self.children:
-                ucb_score = self.get_ucb_score(node)
-                if ucb_score>mejor_ucb:
-                    mejor_ucb = ucb_score
-                    mejor_nodo = node
-            return mejor_nodo
-        
-
-        def get_ucb_score(self, child):
-            q_value = -child.value()
-            u_value = self.C * child.prior * (math.sqrt(self.visit_count) / (1 + child.visit_count))
-            return q_value + u_value
-        
-    class MCTSInfo:
-        def __init__(self, game, C):
-            self.root = MCTS.Node(1, game, C=C)
-            self.search_path = []
-            self.selected_node = None
-            self.value = None
-            self.terminada = None
     
     def __init__(self, games, num_simulations ,config,request_model_queue, response_model_queue, worker_id, mode="selfplay",model_id = "model1"):
         self.games = games
@@ -101,10 +58,12 @@ class MCTS:
         self.cache = MCTSCache()
         self.cache_hits = 0
         self.cache_misses = 0
-        
+
+    # Ejecuta todas las simulaciones MCTS para todos los juegos en paralelo.
+    # Realiza las fases de selección, expansión, backpropagation y devuelve distribuciones de política de cada partida.
     def iniciar(self):
 
-        parallel_mcts = [self.MCTSInfo(game, self.C) for game in self.games]
+        parallel_mcts = [MCTSInfo(game, self.C) for game in self.games]
         
         for _ in range(self.simulations):
 
@@ -128,6 +87,7 @@ class MCTS:
                
                 self.backpropagate(mcts_instance.search_path, mcts_instance.value)
 
+        # Resultados
         resultados = []
 
         for mcts_instance in parallel_mcts:
@@ -146,13 +106,10 @@ class MCTS:
                 root.game.print_board()
 
             resultados.append((moves, distribution, root.value()))
-        
-        #print(f"[MCTS Cache] Hits: {self.cache_hits} | Misses: {self.cache_misses}")
 
-        return resultados  # lista de tuplas (moves, distribution, value)
+        return resultados
 
-        
-    
+    # Navega por el árbol MCTS de la partida desde la raíz hasta un nodo hoja sin expandir.
     def select_node(self,node,search_path):
 
         while node.is_expanded():
@@ -161,7 +118,7 @@ class MCTS:
         
         return node
 
-
+    # Expande los nodos seleccionados usando la red neuronal.
     def expand_nodes(self, expandable_pararlel_mcts):
 
         if len(expandable_pararlel_mcts)>0:
@@ -174,10 +131,12 @@ class MCTS:
             [m for m in expandable_pararlel_mcts if not m.terminada], distribuciones, valores
             ):
                 if mcts_i.selected_node is mcts_i.root and self.mode == "selfplay":
-                    distribucion = self.aplicar_ruido(distribucion)
+                    distribucion = self.aplicar_ruido_dirichlet(distribucion)
                 mcts_i.selected_node.expand(distribucion)
                 mcts_i.value = value
 
+    # Igual que expand_nodes
+    # Pero usando la caché para evitar recomputar distribuciones para tableros vistos previamente.
     def expand_nodes_cache(self, expandable_pararlel_mcts):
 
         if not expandable_pararlel_mcts:
@@ -197,7 +156,7 @@ class MCTS:
                 distribucion, value = cached
                 self.cache_hits +=1
                 if node is mcts_i.root and self.mode == "selfplay":
-                    distribucion = self.aplicar_ruido(distribucion)
+                    distribucion = self.aplicar_ruido_dirichlet(distribucion)
                 node.expand(distribucion)
                 mcts_i.value = value
             else:
@@ -213,7 +172,7 @@ class MCTS:
 
         for mcts_i, distribucion, value in zip(mcts_pendientes_prediccion, distribuciones, valores):
             if mcts_i.selected_node is mcts_i.root:
-                distribucion = self.aplicar_ruido(distribucion)
+                distribucion = self.aplicar_ruido_dirichlet(distribucion)
             mcts_i.selected_node.expand(distribucion)
             mcts_i.value = value
 
@@ -222,7 +181,7 @@ class MCTS:
             key = encoded.tobytes()
             self.cache.put(key, (distribucion, value))
 
-
+    # Propaga el valor estimado por el modelo hacia atrás desde el nodo hoja hasta la raíz
     def backpropagate(self, search_path, value):
         oponente = 1
         for node in reversed(search_path):
@@ -230,7 +189,8 @@ class MCTS:
             node.visit_count += 1
             oponente = oponente*-1
 
-
+    # Solicita al modelo una predicción de política y valor para varios tableros en batch.
+    # Aplica una máscara de movimientos legales a la política resultante.
     def obtener_distribuciones_batch(self, nodos):
         encoded_boards = [torch.tensor(node.game.encode_board(), dtype=torch.float32) for node in nodos]
 
@@ -258,12 +218,12 @@ class MCTS:
 
         return distribuciones_legales, valores
 
-    def aplicar_ruido(self, distribucion):
+    # Añade ruido de Dirichlet a la política en la raíz del árbol para fomentar la exploración
+    def aplicar_ruido_dirichlet(self, distribucion):
 
         alpha = self.dirichlet_alpha
         epsilon = self.exploration_fraction
 
-        # Aplica Dirichlet solo sobre las acciones legales (>0 en la distribución)
         legal_indices = np.where(distribucion > 0)[0]
         dir_noise = np.zeros_like(distribucion)
 
@@ -277,6 +237,53 @@ class MCTS:
         return distribucion
 
 
+# Representa un nodo del árbol MCTS
+class Node:
+    def __init__(self, prior, game, move=None, C=1.5):
+        self.prior = prior
+        self.visit_count = 0
+        self.value_sum = 0
+        self.children = []
+        self.game = game
+        self.move = move
+        self.C = C
 
+    # Devuelve el valor del nodo
+    def value(self):
+        if self.visit_count == 0:
+            return 0
+        return self.value_sum / self.visit_count
 
+    # Indica si el nodo ya ha sido expandido
+    def is_expanded(self):
+        return len(self.children) > 0
 
+    # Genera nodos hijos a partir de la política del modelo
+    def expand(self, distribution):
+
+        for move, prob in enumerate(distribution):
+
+            if prob != 0:
+                game_child = copy.deepcopy(self.game)
+                game_child.make_move(move)
+
+                node = Node(prob, game_child, move, C=self.C)
+                self.children.append(node)
+
+    # Elige el hijo con mejor puntuación UCB (Upper Confidence Bound).
+    def select(self):
+
+        mejor_ucb = -np.inf
+        mejor_nodo = None
+        for node in self.children:
+            ucb_score = self.get_ucb_score(node)
+            if ucb_score > mejor_ucb:
+                mejor_ucb = ucb_score
+                mejor_nodo = node
+        return mejor_nodo
+
+    # Calcula la puntuación UCB
+    def get_ucb_score(self, child):
+        q_value = -child.value()
+        u_value = self.C * child.prior * (math.sqrt(self.visit_count) / (1 + child.visit_count))
+        return q_value + u_value
