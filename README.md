@@ -5,7 +5,7 @@
 ### Raíz del proyecto
 
 - **AlphaZero.py**  
-  Clase principa de AlphaZero. Coordina las fases de self-play, entrenamiento y guardado del modelo.
+  Clase principal de AlphaZero. Coordina las fases de self-play y entrenamiento modelo.
 
 - **AlphaZeroModel.py**  
   Red neuronal basada en (ResNet). Devuelve tanto la probabilidad de jugadas posibles (policy) como el valor del estado (value).
