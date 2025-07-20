@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from AlphaZeroModel import AlphaZeroModel
-from games.CuatroEnRaya import CuatroEnRaya
+from games.CuatroEnRayaFast import CuatroEnRayaFast
 
 
 # Clase para jugar contra un modelo entrenado
@@ -66,12 +66,12 @@ def jugar_vs_modelo(juego,model, device):
             break
 
 if __name__ == "__main__":
-    model = AlphaZeroModel(CuatroEnRaya(), num_residual_blocks=8, num_filters=128)
+    model = AlphaZeroModel(CuatroEnRayaFast(), num_residual_blocks=8, num_filters=128)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model.load_state_dict(torch.load("model_versions/4EnRalla_model_/4EnRalla_model_15.pth", map_location=device))
+    model.load_state_dict(torch.load("model_versions/model_c4_11.pth", map_location=device))
     model.to(device)
     model.eval()
 
-    jugar_vs_modelo(CuatroEnRaya(),model, device)
+    jugar_vs_modelo(CuatroEnRayaFast(),model, device)

@@ -1,7 +1,10 @@
 import json
 import os
+import shutil
 import time
-
+import random
+from collections import Counter
+import logging
 import numpy as np
 import torch
 import torch.multiprocessing as mp
@@ -9,10 +12,19 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
-from AlphaZeroModel import AlphaZeroModel
-from MCTSmultiprocessing import MCTS
 from configs.cuatro_en_raya_config import CuatroEnRayaConfig
-from games.CuatroEnRaya import CuatroEnRaya
+from configs.go_9x9_config import Go9x9Config
+from configs.tres_en_raya_config import TresEnRayaConfig
+from games.CuatroEnRayaFast import CuatroEnRayaFast
+from games.Go9x9 import Go9x9
+from games.TresEnRaya import TresEnRaya
+from workers import self_play_worker, inference_worker, evaluation_worker, inference_evaluation_worker, \
+    inference_worker2
+
+from AlphaZeroModel import AlphaZeroModel
+from MCTSmultiprocessing3 import MCTS3
+from configs.go_5x5_config import Go5x5Config
+from games.Go5x5 import Go5x5
 
 
 # Clase principal que coordina el ciclo de entrenamiento AlphaZero (self-play y entrenamiento)
@@ -25,54 +37,88 @@ class AlphaZero:
         self.model_class = model_class
 
         self.model = model
+        self.current_model_path = ""
         self.device = device
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.config = config
 
-        self.model_save_name = "4EnRalla_model_new"
-        self.model_path = os.path.join("model_versions", self.model_save_name)
-
         os.makedirs("model_versions", exist_ok=True)
-        os.makedirs(self.model_path, exist_ok=True)
+        self.directory_name = "Go_9x9_shared"
 
+        self.directory_path = os.path.join("model_versions", self.directory_name)
+        self.best_model_path =os.path.join("model_versions", self.directory_name ,self.directory_name + "Best.pth")
+        self.last_model_path = os.path.join("model_versions",self.directory_name,"iterations")
+
+        os.makedirs(self.directory_path, exist_ok=True)
+        os.makedirs(self.last_model_path, exist_ok=True)
+
+        self.replay_buffer = ReplayBuffer(config.max_size)
         self.save_configuration()
+
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(message)s",
+            handlers=[
+                logging.StreamHandler(),  # Terminal
+                logging.FileHandler(os.path.join(self.directory_path, "training.log"), mode="a", encoding="utf-8"),
+
+            ]
+        )
 
 
     # Bucle principal de AlphaZero: genera partidas, entrena el modelo y finalmente guarda el modelo entrenado
     def run(self):
 
-        self.save_model(0)
+        file = self.save_model(0)
+        self.save_best_model(file)
+
 
         for iteration in range(self.config.num_iterations):
 
-            print(f"\nIteración {iteration + 1}/{self.config.num_iterations}")
+            logging.info(f"\nIteración {iteration + 1}/{self.config.num_iterations}")
 
             start_time = time.time()
 
             self.model.eval()
-            print("Generando partidas...")
+            logging.info("Generando partidas...")
 
             data = self.generate_games(iteration)
-            
-            print(f"Total de posiciones generadas: {len(data)}")
 
-            dataset = AlphaZeroDataset(data)
+            # Al añadir datos de self-play
+            self.replay_buffer.add(data)
+
+            # Para samplear 25000 posiciones aleatorias:
+            sample_size = min(len(self.replay_buffer), self.config.train_sample)
+            buffer_data = self.replay_buffer.sample(sample_size)
+
+            logging.info(f"Total de posiciones generadas: {len(data)}")
+            logging.info(f"Total de posiciones guardadas en el buffer: {len(self.replay_buffer)}")
+            logging.info(f"Total de posiciones utilizadas del buffer para entrenar: {len(buffer_data)}")
+
+            dataset = AlphaZeroDataset(buffer_data)
             dataloader = DataLoader(dataset, batch_size=self.config.batch_size, shuffle=True)
 
             self.model.train()
             for epoch in range(self.config.num_epochs):
                 avg_loss = self.train(dataloader)
-                print(f"   Epoch {epoch + 1}/{self.config.num_epochs} - Pérdida media: {avg_loss:.4f}")
+                logging.info(f"   Epoch {epoch + 1}/{self.config.num_epochs} - Pérdida media: {avg_loss:.4f}")
 
-            self.save_model(iteration+1)
-            filename = os.path.join(self.model_path, f"{self.model_save_name}{iteration + 1}.pth")
-            print(f"Modelo guardado como: {filename}")
+            self.save_model(iteration + 1)
+            filename = os.path.join(self.last_model_path, f"{self.directory_name}{iteration + 1}.pth")
+            logging.info(f"Modelo guardado como: {filename}")
 
             self.scheduler.step()
+            if iteration % self.config.evaluation_frequency == 0:
+                self.evaluate()
+
 
             duration = time.time() - start_time
-            print(f"Duración de la iteración: {duration:.2f} segundos")
+            logging.info(f"Duración de la iteración: {duration:.2f} segundos")
+
+
+
+
 
 
     # Genera partidas mediante self-play en paralelo y devuelve los datos recolectados
@@ -81,7 +127,7 @@ class AlphaZero:
         request_model_queue = mp.Queue()
         response_model_queues = [mp.Queue() for _ in range(self.config.num_selfplay_workers)]
         result_queue = mp.Queue()
-        model_path = os.path.join(self.model_path, f"{self.model_save_name}{iteration}.pth")
+        model_path = self.current_model_path
 
         # Proceso de inferencia del modelo
         inference_proc = mp.Process(
@@ -150,22 +196,143 @@ class AlphaZero:
         total_loss /= len(dataloader)
         return total_loss
 
+    def evaluate(self):
+
+        current_model_path =  self.current_model_path
+
+        request_model_queue = mp.Queue()
+        response_model_queues = [mp.Queue() for _ in range(config.num_test_workers)]
+        result_queue = mp.Queue()
+
+        # Proceso de inferencia del modelo
+        inference_proc = mp.Process(
+            target=inference_evaluation_worker,
+            args=(self.game_class, (self.model_class, current_model_path), (self.model_class, self.best_model_path), self.device, self.config,
+                  request_model_queue,
+                  response_model_queues)
+        )
+        inference_proc.start()
+
+        # procesos para generar partidas
+        workers = []
+        for wid in range(config.num_test_workers):
+            p = mp.Process(
+                target=evaluation_worker,
+                args=(
+                    self.game_class,
+                    self.mcts_class,
+                    config,
+                    result_queue,
+                    request_model_queue,
+                    response_model_queues[wid],
+                    wid
+
+                )
+            )
+            p.start()
+            workers.append(p)
+
+        all_data = []
+        for _ in range(config.num_test_workers):
+            all_data.extend(result_queue.get())
+
+        for p in workers:
+            p.join()
+
+        request_model_queue.put(None)
+        inference_proc.join()
+
+        conteo = Counter(all_data)
+
+        resultados = {
+            "modelo1": conteo.get("model1", 0),
+            "modelo2": conteo.get("model2", 0),
+            "empates": conteo.get("empate", 0)
+        }
+
+
+        wins1 = resultados['modelo1']
+        wins2 = resultados['modelo2']
+        draws = resultados['empates']
+
+        # Total de partidas jugadas
+        total_games = wins1 + wins2 + draws
+
+        # Score del modelo actual (modelo1): victoria = 1, empate = 0.5, derrota = 0
+        score_actual = (wins1 + 0.5 * draws) / total_games if total_games > 0 else 0
+
+        # Score del modelo best (modelo2), opcional
+        score_best = (wins2 + 0.5 * draws) / total_games if total_games > 0 else 0
+
+        logging.info("\n--- Evaluación ---")
+        logging.info(f"Modelo Actual ({self.current_model_path}): {wins1} victorias")
+        logging.info(f"Modelo best ({self.best_model_path}): {wins2} victorias")
+        logging.info(f"Empates: {draws}")
+        logging.info(f"Winrate: Modelo Actual: {score_actual * 100:.2f}%, Modelo Best: {score_best * 100:.2f}%")
+        logging.info("")
+
+        if score_actual >= self.config.test_win_rate_threshold:
+            self.save_best_model(self.current_model_path)
+            logging.info(" - Nuevo modelo guardado como Best.")
+            logging.info("")
+
+        else:
+            logging.info(" - El nuevo modelo no ha superado el threshold. Restaurando modelo Best.")
+            logging.info("")
+            best_weights = torch.load(self.best_model_path, map_location=self.device)
+            self.model.load_state_dict(best_weights)
+            self.current_model_path = self.best_model_path
+
 
     # Guarda el modelo actual en un archivo .pth
     def save_model(self, iteration):
 
-        filename = os.path.join(self.model_path, f"{self.model_save_name}{iteration}.pth")
+        filename = os.path.join(self.last_model_path, f"{self.directory_name}{iteration}.pth")
         torch.save(self.model.state_dict(), filename)
+        self.current_model_path = filename
+        return filename
+
+
+    def save_best_model(self, model_path):
+        """Guarda el modelo ganador como el nuevo best."""
+        shutil.copy(model_path, self.best_model_path)
 
     # Guarda la configuración actual en un archivo config.json
     def save_configuration(self):
 
         # Guardar configuración como config.json
         config_dict = vars(self.config)
-        config_path = os.path.join(self.model_path, "config.json")
+        config_path = os.path.join(self.directory_path, "config.json")
         with open(config_path, 'w') as f:
             json.dump(config_dict, f, indent=4)
         pass
+
+
+class ReplayBuffer:
+    def __init__(self, max_size=100000):
+        self.max_size = max_size
+        self.buffer = []   # Guarda tuplas: (encoded_board, probs, z)
+        self.ptr = 0       # Índice circular para sobrescribir cuando esté lleno
+
+    def add(self, data):
+        """Añade una lista de ejemplos al buffer."""
+        for item in data:
+            if len(self.buffer) < self.max_size:
+                self.buffer.append(item)  # Aún hay espacio
+            else:
+                # Sobrescribe usando índice circular
+                self.buffer[self.ptr] = item
+                self.ptr = (self.ptr + 1) % self.max_size
+
+    def sample(self, sample_size):
+        """Devuelve una muestra aleatoria del buffer."""
+        if sample_size > len(self.buffer):
+            raise ValueError(f"Intentas samplear {sample_size}, pero solo hay {len(self.buffer)} elementos.")
+        return random.sample(self.buffer, sample_size)
+
+    def __len__(self):
+        """Permite usar len(buffer)."""
+        return len(self.buffer)
 
 
 # Dataset personalizado que prepara los datos para el entrenamiento de AlphaZero
@@ -190,143 +357,13 @@ class AlphaZeroDataset(Dataset):
         return board, probs, result
 
 
-# Contiene el estado de una partida en self-play
-class GameInfo:
-    def __init__(self, game):
-        self.game = game
-        self.history = []
-        self.winner = None
-        self.terminado = False
-        self.num_turn = 0
-
-
-# Aplica temperatura a la política del selfplay para fomentar la exploración durante los primeros turnos
-def aplicar_temperatura(probs, turn, config):
-
-    if turn < config.temperature_threshold:
-        temperature = config.selfplay_temperature
-        logits = np.log(probs + 1e-8) / temperature
-        policy = np.exp(logits) / np.sum(np.exp(logits))
-        return policy
-    else:
-        return probs
-
-
-# Proceso que ejecuta múltiples partidas en paralelo con MCTS y devuelve datos de entrenamiento
-def self_play_worker(game_class,mcts_class,config, result_queue, request_model_queue,response_model_queue, wid):
-
-    datos = []
-
-    for _ in range(config.games_for_worker // config.simultaneous_games_per_worker):
-        games_info = [GameInfo(game_class()) for _ in range(config.simultaneous_games_per_worker)]
-
-        while any(not g.terminado for g in games_info):
-
-            games_info_active = [g for g in games_info if not g.terminado]
-            games = [g.game for g in games_info_active]
-
-            resultados_mcts = mcts_class(games, config.num_mcts_simulations,config, request_model_queue,response_model_queue, wid).iniciar()
-
-
-            for game_info, (_, probs, _) in zip(games_info_active, resultados_mcts):
-
-
-                probs_temperature = aplicar_temperatura(probs, game_info.num_turn, config)
-
-                encoded_board = game_info.game.encode_board()
-                jugador_actual = game_info.game.player
-
-                game_info.history.append((encoded_board, probs_temperature, jugador_actual))
-
-                move = np.random.choice(game_info.game.ACTION_SIZE, p=probs_temperature)
-                game_info.game.make_move(move)
-
-                game_info.num_turn  += 1
-
-                terminado = game_info.game.is_game_over()
-
-                if terminado:
-                    game_info.terminado = True
-                    game_info.winner = game_info.game.get_game_result()
-
-        for game_info in games_info:
-            for encoded_board, probs, player_history in game_info.history:
-                z = 0 if game_info.winner == 0 else (1 if player_history == game_info.winner else -1)
-                datos.append((encoded_board, probs, z))
-
-    result_queue.put(datos)
-
-
-# Proceso centralizado que realiza inferencia del modelo para todos los workers de self-play
-def inference_worker(game_class,model_class,model_path, device, config,request_queue, response_queues):
-    model = model_class(game_class(),config.num_residual_blocks, config.num_filters)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
-    model.eval()
-
-    while True:
-        try:
-            item = request_queue.get(timeout=0.1)
-
-            if item is None:
-                break
-
-            board_batch, wid = item
-    
-            batch_tensor = torch.stack(board_batch).to(device)
-
-            with torch.no_grad():
-                policy_batch, value_batch = model(batch_tensor)
-
-
-            response_queues[wid].put((
-                [p.cpu() for p in policy_batch],
-                [v.cpu() for v in value_batch]
-            ))
-
-        except:
-            continue
-
-# Guarda los datos generados durante el self-play en un archivo de texto
-def save_selfplay_data(path, data, iter_num):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a") as f:
-        f.write(f"\n=========== SELFPLAY - ITERACIÓN {iter_num} ===========\n\n")
-        for i, (board, probs, result) in enumerate(data):
-            f.write(f"--- EJEMPLO {i} ---\n")
-            f.write("Board:\n")
-            f.write(np.array2string(np.array(board), separator=', '))
-            f.write("\nProbs:\n")
-            f.write(np.array2string(np.array(probs), separator=', ', precision=3))
-            f.write(f"\nSuma probs: {np.sum(probs):.4f}\n")
-            f.write(f"Resultado Z: {result}\n\n")
-
-
-# Guarda los datos de un batch de entrenamiento
-def log_training_batch(path, boards, pred_pi, pred_v, target_pi, target_v, iter_num, epoch_num):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a") as f:
-        f.write(f"\n=========== ITERACIÓN {iter_num} - EPOCH {epoch_num} ===========\n\n")
-        for i in range(len(boards)):
-            f.write(f"--- BATCH EJEMPLO {i} ---\n")
-            f.write("Board:\n")
-            f.write(np.array2string(boards[i].cpu().numpy(), separator=', '))
-            f.write("\nTarget probs:\n")
-            f.write(np.array2string(target_pi[i].cpu().numpy(), separator=', ', precision=3))
-            f.write("\nPredicted logits (sin softmax):\n")
-            f.write(np.array2string(pred_pi[i].detach().cpu().numpy(), separator=', ', precision=3))
-            f.write(f"\nTarget value: {target_v[i].item():.3f}\n")
-            f.write(f"Predicted value: {pred_v[i].detach().item():.3f}\n\n")
-   
-
-
 
 if __name__ == '__main__':
     mp.set_start_method("spawn", force=True)
 
-    config = CuatroEnRayaConfig()
+    config = Go9x9Config()
 
-    game = CuatroEnRaya()
+    game = Go9x9()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -334,9 +371,9 @@ if __name__ == '__main__':
 
     optimizer = optim.SGD(model.parameters(), lr=config.learning_rate, momentum=0.9, weight_decay=config.weight_decay)
 
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
 
-    alphazero = AlphaZero(CuatroEnRaya,MCTS,AlphaZeroModel,model,device,optimizer,scheduler,config)
+    alphazero = AlphaZero(Go9x9,MCTS3,AlphaZeroModel,model,device,optimizer,scheduler,config)
 
     alphazero.run()
 

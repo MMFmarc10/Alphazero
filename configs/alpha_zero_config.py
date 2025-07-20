@@ -3,13 +3,13 @@ class AlphaZeroConfig:
     def __init__(self):
         # ==== Entrenamiento general ====
         # Número de iteraciones
-        self.num_iterations = 15
+        self.num_iterations = 1
 
         # ==== Self-Play ====
         # Partidas por iteración
         self.num_selfplay_games = 600
         # Número de procesos paralelos
-        self.num_selfplay_workers = 4
+        self.num_selfplay_workers = 6
         # Número de partidas que un worker juega a la vez
         self.simultaneous_games_per_worker = 50
         # Partidas que juga cada worker

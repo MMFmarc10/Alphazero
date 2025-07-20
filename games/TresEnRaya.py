@@ -13,6 +13,7 @@ class TresEnRaya(BaseGame):
         self.board = np.zeros((self.ROWS, self.COLS), dtype=int)
         self.player = 1
         self.result = None
+        self.move_history = []
         
     def legal_moves(self):
         return [r * self.COLS + c for r in range(self.ROWS) for c in range(self.COLS) if self.board[r][c] == 0]
@@ -24,9 +25,17 @@ class TresEnRaya(BaseGame):
         row, col = divmod(action, self.COLS)
         if self.board[row][col] == 0:
             self.board[row][col] = self.player
+            self.move_history.append((row, col))
             self.player *= -1
             return True
         return False
+
+    def undo_move(self):
+        row, col = self.move_history.pop()
+        self.board[row][col] = 0
+        self.player *= -1
+        self.result = None
+        return True
 
     def check_win(self) -> bool:
         b = self.board

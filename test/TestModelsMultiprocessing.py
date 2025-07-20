@@ -6,9 +6,11 @@ import torch
 import torch.multiprocessing as mp
 
 from AlphaZeroModel import AlphaZeroModel
-from MCTSmultiprocessing import MCTS
+from MCTSmultiprocessing1 import MCTS1
 from configs.cuatro_en_raya_config import CuatroEnRayaConfig
-from games.CuatroEnRaya import CuatroEnRaya
+
+from games.CuatroEnRayaFast import CuatroEnRayaFast
+from test.Go5x5Fast import Go5x5Fast
 
 
 # Compara dos modelos AlphaZero usando MCTS, temperatura definida en la configuración,
@@ -162,7 +164,7 @@ def inference_test_worker(game_class, model_info_1, model_info_2, device, config
                 break
 
             board_batch, wid, turn_owner = item  # 'model1' o 'model2'
-            batch_tensor = torch.stack(board_batch).to(device)
+            batch_tensor =board_batch.to(device)
 
             with torch.no_grad():
                 if turn_owner == "model1":
@@ -170,18 +172,21 @@ def inference_test_worker(game_class, model_info_1, model_info_2, device, config
                 else:
                     policy_batch, value_batch = model2(batch_tensor)
 
+                policy_batch = torch.softmax(policy_batch, dim=1)
+
             response_queues[wid].put((
-                [p.cpu() for p in policy_batch],
-                [v.cpu() for v in value_batch]
+                policy_batch.cpu(),
+                value_batch.cpu()
             ))
 
         except:
             continue
 
 
+
 def aplicar_temperatura(probs,config):
 
-    temperature = config.test_temperature
+    temperature = config.test_temperature_after
 
     logits = np.log(probs + 1e-8) / temperature
     policy = np.exp(logits) / np.sum(np.exp(logits))
@@ -196,14 +201,14 @@ if __name__ == '__main__':
 
     config = CuatroEnRayaConfig()
 
-    model_path_1 = "model_versions/4EnRalla_model_/4EnRalla_model_0.pth"
-    model_path_2 = "model_versions/4EnRalla_model_/4EnRalla_model_15.pth"
+    model_path_1 = "../model_versions/CuatroEnRayaTest2_/CuatroEnRayaTest2_Best.pth"
+    model_path_2 = "../model_versions/CuatroEnRayaTest/CuatroEnRayaTestBest.pth"
 
     start_time = time.time()  # Inicio
 
     resultados = evaluate_models(
-        CuatroEnRaya,
-        MCTS,
+        CuatroEnRayaFast,
+        MCTS1,
         AlphaZeroModel,
         AlphaZeroModel,
         model_path_1,

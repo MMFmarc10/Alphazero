@@ -3,12 +3,12 @@ class CuatroEnRayaConfig:
 
     def __init__(self):
         # Entrenamiento general
-        self.num_iterations = 15
+        self.num_iterations = 40
 
         # SelfPlay
         self.num_selfplay_games = 600
-        self.num_selfplay_workers = 4
-        self.simultaneous_games_per_worker = 50
+        self.num_selfplay_workers = 5
+        self.simultaneous_games_per_worker = 60
         self.games_for_worker = self.num_selfplay_games // self.num_selfplay_workers
         self.selfplay_temperature = 1.25
         self.temperature_threshold = 10
@@ -30,9 +30,16 @@ class CuatroEnRayaConfig:
         self.num_filters = 128
 
         # Evaluation
-        self.num_test_games = 200
+        self.num_test_games = 100
         self.num_test_workers = 4
         self.test_games_per_worker = 25
-        self.test_num_simulations = 50
-        self.test_temperature = 0.2
+        self.test_num_simulations = 300
+        self.test_temperature_before = 0.8
+        self.test_temperature_threshold = 6
+        self.test_temperature_after = 0.1
         self.test_win_rate_threshold = 0.55
+        self.evaluation_frequency = 2
+
+        # Replay Buffer
+        self.max_size = 100000
+        self.train_sample = 35000
